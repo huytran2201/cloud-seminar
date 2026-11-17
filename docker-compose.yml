@@ -1,0 +1,108 @@
+services:
+  app:
+    build: ./app
+    container_name: aiops-app
+    ports:
+      - "8000:8000"
+    networks:
+      - aiops-net
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ============================================================
+  # Service 2: AIOps Detector (Isolation Forest + Flask)
+  # ============================================================
+  ai-detector:
+    build:
+      context: ./ai_detector
+      dockerfile: Dockerfile
+    platform: linux/amd64 # Tương thích WSL2 backend (Ubuntu)
+    container_name: aiops-ai-detector
+    ports:
+      - "8001:8001"
+    networks:
+      - aiops-net
+    depends_on:
+      prometheus:
+        condition: service_healthy # Chờ Prometheus healthy rồi mới start
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1 # Hiển thị log ngay lập tức (quan trọng khi demo)
+
+  # ============================================================
+  # Service 3: Prometheus (TSDB & Scraper)
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    platform: linux/amd64
+    container_name: aiops-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - aiops-net
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ============================================================
+  # Service 4: Grafana (Visualization + Auto-Provisioning)
+  # ============================================================
+  grafana:
+    image: grafana/grafana:10.4.2
+    platform: linux/amd64
+    container_name: aiops-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      # Auto-provisioning: datasource + dashboard provider configs
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      # Dashboard JSON files
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # Persistent storage cho Grafana
+      - grafana-data:/var/lib/grafana
+    networks:
+      - aiops-net
+    depends_on:
+      prometheus:
+        condition: service_healthy # Chờ Prometheus healthy rồi mới start
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/aiops_dashboard.json
+      - GF_LOG_LEVEL=warn # Giảm noise log khi demo
+    restart: unless-stopped
+
+# ============================================================
+# Volumes: lưu trữ dữ liệu persistent
+# ============================================================
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+# ============================================================
+# Networks: mạng nội bộ cho các service giao tiếp
+# ============================================================
+networks:
+  aiops-net:
+    driver: bridge

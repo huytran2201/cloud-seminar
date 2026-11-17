@@ -1,0 +1,19 @@
+# prometheus/prometheus.yml
+# Cấu hình Prometheus: scrape cả app và ai-detector mỗi 5 giây
+
+global:
+  scrape_interval: 5s          # Thu thập metrics mỗi 5 giây (phù hợp demo real-time)
+  evaluation_interval: 5s      # Đánh giá alerting rules mỗi 5 giây
+
+scrape_configs:
+  # --- Service 1: Target Microservice (FastAPI) ---
+  - job_name: "app"
+    static_configs:
+      - targets: ["app:8000"]
+    metrics_path: /metrics
+
+  # --- Service 2: AIOps Detector (Isolation Forest) ---
+  - job_name: "ai-detector"
+    static_configs:
+      - targets: ["ai-detector:8001"]
+    metrics_path: /metrics

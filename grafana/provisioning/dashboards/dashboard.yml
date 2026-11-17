@@ -1,0 +1,14 @@
+# grafana/provisioning/dashboards/dashboard.yml
+# Auto-provisioning: Chỉ định thư mục chứa dashboard JSON để Grafana tự import
+
+apiVersion: 1
+
+providers:
+  - name: "AIOps Dashboards"
+    orgId: 1
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
