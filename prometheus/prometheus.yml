@@ -14,6 +14,13 @@ alerting:
         - targets: ["alertmanager:9093"]
 
 scrape_configs:
+  # --- Windows host running Docker Desktop ---
+  # windows_exporter listens on host port 9182 by default.
+  - job_name: "windows-host"
+    static_configs:
+      - targets: ["host.docker.internal:9182"]
+    metrics_path: /metrics
+
   # --- Service 1: Target Microservice (FastAPI) ---
   - job_name: "app"
     static_configs:

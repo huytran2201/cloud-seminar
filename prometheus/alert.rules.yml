@@ -1,4 +1,13 @@
 groups:
+  - name: windows-host-recording
+    rules:
+      - record: windows_host_cpu_percent
+        expr: 100 * (1 - avg by (instance) (rate(windows_cpu_time_seconds_total{job="windows-host", mode="idle"}[1m])))
+
+      # 0 means close to the rolling 5-minute mean; 1 means at least 3 standard deviations away.
+      - record: windows_host_cpu_anomaly_score
+        expr: clamp_max(abs(windows_host_cpu_percent - avg_over_time(windows_host_cpu_percent[5m])) / (3 * clamp_min(stddev_over_time(windows_host_cpu_percent[5m]), 2)), 1)
+
   - name: service-health
     rules:
       - alert: AppTargetDown
@@ -20,6 +29,16 @@ groups:
         annotations:
           summary: "AI Detector target is unreachable"
           description: "Prometheus has failed to scrape {{ $labels.instance }} for at least 10 seconds."
+
+      - alert: WindowsHostExporterDown
+        expr: up{job="windows-host"} == 0
+        for: 10s
+        labels:
+          severity: critical
+          service: windows-host
+        annotations:
+          summary: "Windows host exporter is unreachable"
+          description: "Prometheus has failed to scrape {{ $labels.instance }} for at least 10 seconds. No automatic recovery action is configured."
 
       - alert: HighRequestLatency
         expr: |
@@ -53,3 +72,23 @@ groups:
         annotations:
           summary: "AIOps anomaly score crossed 0.70"
           description: "The current anomaly score is {{ $value | humanize }}."
+
+      - alert: WindowsHostCPUAnomalyDetected
+        expr: windows_host_cpu_anomaly_score > 0.7
+        for: 10s
+        labels:
+          severity: warning
+          service: windows-host
+        annotations:
+          summary: "Windows host CPU anomaly score crossed 0.70"
+          description: "CPU anomaly score for {{ $labels.instance }} is {{ $value | humanize }}."
+
+      - alert: WindowsHostCPUUsageHigh
+        expr: windows_host_cpu_percent > 80
+        for: 5s
+        labels:
+          severity: warning
+          service: windows-host
+        annotations:
+          summary: "Windows host CPU usage is above 80%"
+          description: "CPU usage for {{ $labels.instance }} is {{ $value | humanize }} percent."

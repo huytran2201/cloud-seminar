@@ -59,7 +59,13 @@ Từ thư mục gốc của repository, chạy một lối khởi động chính
 .\start_demo.bat
 ```
 
-Launcher sẽ build và chạy sáu service, chờ health check tối đa khoảng 45 giây, mở Grafana, Prometheus Alerts, Alertmanager Alerts và Alert Receiver, rồi chạy demo tương tác. Receiver dùng một cổng host ngẫu nhiên do Docker cấp; địa chỉ chính xác được in trong terminal. Khi demo hỏi, nhấn Enter để chuyển phase. Ở cuối, chọn `n` để giữ container chạy hoặc `y` để dừng chúng.
+`start_demo.bat` gọi bước build/khởi động và mở trang trong `build.bat`/`build.ps1`, rồi chạy demo tương tác. Nếu chỉ muốn build, mở các trang giám sát và không chạy demo, dùng:
+
+```powershell
+.\build.bat
+```
+
+Build sẽ chạy sáu service, chờ health check tối đa 60 giây rồi mở Grafana, Prometheus Alerts, Alertmanager Alerts và Alert Receiver. Receiver dùng một cổng host ngẫu nhiên do Docker cấp; địa chỉ chính xác được in trong terminal. Khi chạy `start_demo.bat`, nhấn Enter để chuyển phase demo. Ở cuối, chọn `n` để giữ container chạy hoặc `y` để dừng chúng.
 
 Lần build đầu cần tải image Docker và cài thư viện bên trong image, nên có thể mất vài phút. Những lần sau thường nhanh hơn.
 
@@ -73,6 +79,28 @@ Lần build đầu cần tải image Docker và cài thư viện bên trong imag
 | Alert Receiver | Cổng động; dùng URL được in bởi `start_demo.bat` |
 
 Grafana nạp dashboard tự động. Prometheus và Alertmanager xem các alert đang hoạt động; Receiver là hộp thư webhook lưu sự kiện firing/resolved trong bộ nhớ của container.
+
+### 4. Bật đo CPU thật của máy Windows
+
+Dashboard có các panel riêng cho Windows host: **Windows Host CPU (Real)**, **Windows Host CPU Anomaly Score**, **Windows Exporter Scrape Latency** và **Windows Host System Health**. Đường đỏ `80%` trên CPU thật kích hoạt `WindowsHostCPUUsageHigh` khi vượt ngưỡng 5 giây; đường đỏ `0.7` trên anomaly score kích hoạt `WindowsHostCPUAnomalyDetected` khi vượt ngưỡng 10 giây. Nếu exporter mất kết nối 10 giây, Prometheus firing `WindowsHostExporterDown`. Alertmanager gửi các alert này tới Alert Receiver cục bộ; cấu hình hiện không gửi thông báo desktop/email. Scrape latency đo thời gian Prometheus lấy metrics từ exporter, không phải độ trễ thực thi CPU hay request ứng dụng. System Health biểu thị target exporter UP/DOWN. Score thống kê mức lệch CPU so với trung bình trượt 5 phút (0 = bình thường theo cửa sổ gần đây; 1 = lệch ít nhất 3 độ lệch chuẩn); nó khác với Isolation Forest score của app. Không có hành động tự phục hồi cho Windows host; panel **Self-Healing Events** hiện có vẫn đếm remediation của app demo. Panel **CPU Utilization** hiện có vẫn là CPU giả lập của app.
+
+1. Tải và cài MSI `windows_exporter` phù hợp với máy từ [GitHub Releases](https://github.com/prometheus-community/windows_exporter/releases). Cài với thiết lập mặc định; exporter chạy như Windows service và mặc định xuất metrics ở cổng `9182`, đường dẫn `/metrics`.
+2. Trên máy Windows, mở `http://localhost:9182/metrics` để xác nhận endpoint trả về metrics.
+3. Khởi động lại Prometheus để nạp scrape target và recording rules:
+
+   ```powershell
+   docker-compose restart prometheus
+   ```
+
+4. Khởi động lại Grafana để nạp dashboard mới:
+
+   ```powershell
+   docker-compose restart grafana
+   ```
+
+5. Mở `http://localhost:9090/targets` và xác nhận job `windows-host` có trạng thái **UP**. Sau đó mở Grafana; hai panel CPU host sẽ hiển thị sau khi Prometheus thu thập được dữ liệu.
+
+Prometheus truy cập exporter qua `host.docker.internal`, tên host Docker Desktop dùng để container kết nối về máy Windows. Scrape target và PromQL của panel đã được khai báo trong repo.
 
 ### Dừng hoặc làm sạch dữ liệu
 
@@ -90,7 +118,7 @@ Lưu ý: receiver giữ lịch sử trong bộ nhớ; nếu container receiver b
 
 ### Giới hạn mô phỏng cần biết
 
-- CPU và RAM trên dashboard là **metric giả lập do app tự đặt**, không phải mức sử dụng thật của máy hoặc container. Latency được tạo từ thời gian xử lý mô phỏng.
+- CPU/RAM của app vẫn là **metric giả lập**; panel **Windows Host CPU (Real)** dùng `windows_exporter` để đo CPU thật của máy Windows chạy Docker Desktop. Latency được tạo từ thời gian xử lý mô phỏng.
 - Docker DNS phân giải tên service như `app` và `ai-detector`, nhưng Prometheus vẫn có `static_configs`; thêm target mới vẫn cần sửa cấu hình scrape.
 - `/api/remediate` đặt lại các metric/trạng thái mô phỏng của app. Đây chưa phải thao tác khởi động lại container, sửa máy thật hay chạy remediation trên hạ tầng production.
 - Alertmanager hiện gửi webhook tới receiver cục bộ; chưa gửi Telegram, Slack hay email.
