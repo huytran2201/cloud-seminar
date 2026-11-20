@@ -1,8 +1,10 @@
 {
   "__inputs": [],
   "__requires": [],
-  "annotations": { "list": [] },
-  "description": "AIOps - Phát hiện bất thường động bằng Isolation Forest. Minh họa hạn chế của threshold tĩnh vs AI-driven detection.",
+  "annotations": {
+    "list": []
+  },
+  "description": "AIOps - Dynamic Anomaly Detection with Isolation Forest & Explainable AI vs Static Thresholds.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -10,15 +12,8 @@
   "links": [],
   "panels": [
     {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
-      "id": 10,
-      "title": "🖥️ Hệ thống giám sát truyền thống (Threshold tĩnh)",
-      "type": "row"
-    },
-    {
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "CPU của microservice. Đường đỏ = ngưỡng tĩnh 80% (truyền thống). Chú ý: chế độ anomaly chỉ dùng ~40-45% CPU nên KHÔNG bị cảnh báo!",
+      "description": "CPU consumption (%) of microservice. Red threshold marks static alert limit (80%).",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -41,6 +36,7 @@
             "stacking": { "group": "A", "mode": "none" },
             "thresholdsStyle": { "mode": "line+area" }
           },
+          "decimals": 1,
           "mappings": [],
           "max": 100,
           "min": 0,
@@ -55,14 +51,14 @@
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "CPU Usage" },
+            "matcher": { "id": "byName", "options": "CPU" },
             "properties": [
               { "id": "color", "value": { "fixedColor": "semi-dark-blue", "mode": "fixed" } }
             ]
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 1 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "id": 1,
       "options": {
         "legend": {
@@ -77,16 +73,16 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "app_simulated_cpu_percent",
-          "legendFormat": "CPU Usage",
+          "legendFormat": "CPU",
           "refId": "A"
         }
       ],
-      "title": "Panel 1: CPU Usage vs Static Threshold (80%) ⚠️ Anomaly ở ~45% KHÔNG bị phát hiện!",
+      "title": "CPU Utilization",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Độ trễ trung bình của request. Chế độ anomaly gây giật cục 1.5-3s — có thể thấy rõ sự bất thường!",
+      "description": "Average request processing latency in seconds. Red line marks SLO limit at 1.0s.",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -107,29 +103,30 @@
             "showPoints": "never",
             "spanNulls": false,
             "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
+            "thresholdsStyle": { "mode": "line" }
           },
+          "decimals": 3,
           "mappings": [],
           "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "red", "value": 80 }
+              { "color": "red", "value": 1.0 }
             ]
           },
           "unit": "s"
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Avg Latency" },
+            "matcher": { "id": "byName", "options": "Latency" },
             "properties": [
               { "id": "color", "value": { "fixedColor": "semi-dark-orange", "mode": "fixed" } }
             ]
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 9 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "id": 2,
       "options": {
         "legend": {
@@ -143,31 +140,24 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "rate(app_request_latency_seconds_sum[1m]) / rate(app_request_latency_seconds_count[1m])",
-          "legendFormat": "Avg Latency",
+          "expr": "sum(rate(app_request_latency_seconds_sum[30s])) / sum(rate(app_request_latency_seconds_count[30s]))",
+          "legendFormat": "Latency",
           "refId": "A"
         }
       ],
-      "title": "Panel 2: Request Latency (giật cục khi anomaly)",
+      "title": "Request Latency",
       "type": "timeseries"
     },
     {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
-      "id": 11,
-      "title": "🤖 AIOps - Isolation Forest Detection",
-      "type": "row"
-    },
-    {
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Điểm bất thường từ Isolation Forest [0=bình thường, 1=rất bất thường]. Đường đỏ tại 0.7 là ngưỡng cảnh báo. AI phát hiện được anomaly ngay cả khi CPU chỉ ~45%!",
+      "description": "Anomaly probability score on [0.0 - 1.0] scale. Dynamic alert triggered when score > 0.70.",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Anomaly Score",
+            "axisLabel": "Score [0 - 1]",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -183,6 +173,7 @@
             "stacking": { "group": "A", "mode": "none" },
             "thresholdsStyle": { "mode": "line+area" }
           },
+          "decimals": 2,
           "mappings": [],
           "max": 1,
           "min": 0,
@@ -193,18 +184,18 @@
               { "color": "semi-dark-red", "value": 0.7 }
             ]
           },
-          "unit": "percentunit"
+          "unit": "none"
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "AI Anomaly Score" },
+            "matcher": { "id": "byName", "options": "AI Score" },
             "properties": [
               { "id": "color", "value": { "fixedColor": "semi-dark-purple", "mode": "fixed" } }
             ]
           }
         ]
       },
-      "gridPos": { "h": 9, "w": 18, "x": 0, "y": 18 },
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 8 },
       "id": 3,
       "options": {
         "legend": {
@@ -219,22 +210,32 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "ai_anomaly_score",
-          "legendFormat": "AI Anomaly Score",
+          "legendFormat": "AI Score",
           "refId": "A"
         }
       ],
-      "title": "Panel 3: AI Anomaly Score (Isolation Forest) 🚨 Phát hiện anomaly khi CPU chỉ ~45%!",
+      "title": "Anomaly Score",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Trạng thái hiện tại: AI có đang phát hiện bất thường không?",
+      "description": "Real-time AI health state: NORMAL (0) or ANOMALY (1).",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
           "mappings": [
-            { "options": { "0": { "color": "green", "index": 0, "text": "✅ BÌNH THƯỜNG" } }, "type": "value" },
-            { "options": { "1": { "color": "red", "index": 1, "text": "🚨 BẤT THƯỜNG" } }, "type": "value" }
+            {
+              "options": {
+                "0": { "color": "green", "index": 0, "text": "NORMAL" }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "1": { "color": "red", "index": 1, "text": "ANOMALY" }
+              },
+              "type": "value"
+            }
           ],
           "thresholds": {
             "mode": "absolute",
@@ -246,7 +247,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 9, "w": 6, "x": 18, "y": 18 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
       "id": 4,
       "options": {
         "colorMode": "background",
@@ -264,24 +265,126 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "ai_is_anomaly",
-          "legendFormat": "Anomaly Status",
+          "legendFormat": "Status",
           "refId": "A"
         }
       ],
-      "title": "🤖 AI Detection Status",
+      "title": "System Health",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Explainable AI (XAI) feature attribution percentage explaining the anomaly.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": {},
+          "decimals": 1,
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "#EAB839", "value": 30 },
+              { "color": "red", "value": 60 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 16 },
+      "id": 5,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 18,
+        "minVizWidth": 0,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "ai_feature_attribution * 100",
+          "legendFormat": "{{feature}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Root Cause Attribution",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Total count of successful closed-loop self-healing events.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "id": 6,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "app_remediation_total",
+          "legendFormat": "Remediations",
+          "refId": "A"
+        }
+      ],
+      "title": "Self-Healing Events",
       "type": "stat"
     }
   ],
   "refresh": "5s",
   "schemaVersion": 38,
-  "tags": ["aiops", "isolation-forest", "anomaly-detection", "cloud"],
+  "tags": [
+    "aiops",
+    "isolation-forest",
+    "anomaly-detection",
+    "cloud"
+  ],
   "templating": {
     "list": [
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "Prometheus",
+          "value": "prometheus"
+        },
         "hide": 0,
         "includeAll": false,
-        "label": "Datasource",
+        "label": "Data Source",
         "multi": false,
         "name": "datasource",
         "options": [],
@@ -293,10 +396,13 @@
       }
     ]
   },
-  "time": { "from": "now-10m", "to": "now" },
+  "time": {
+    "from": "now-10m",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "AIOps - Dynamic Anomaly Detection",
   "uid": "aiops-isolation-forest-demo",
-  "version": 1
+  "version": 5
 }

@@ -5,6 +5,9 @@ global:
   scrape_interval: 5s          # Thu thập metrics mỗi 5 giây (phù hợp demo real-time)
   evaluation_interval: 5s      # Đánh giá alerting rules mỗi 5 giây
 
+rule_files:
+  - "/etc/prometheus/alert.rules.yml"
+
 scrape_configs:
   # --- Service 1: Target Microservice (FastAPI) ---
   - job_name: "app"
