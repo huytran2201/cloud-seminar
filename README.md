@@ -16,7 +16,7 @@ Bảng dưới đây tổng hợp toàn bộ các khối kiến thức lý thuy�
 | **2** | **Kiến trúc Microservices (Stateless vs Stateful)** | • Tách biệt nhiệm vụ độc lập (Decoupling).<br>• **Stateless**: Dễ dàng scale-out ngang phía sau Load Balancer.<br>• **Stateful**: Bảo toàn dữ liệu qua Named Volumes (*Ephemeral Containers vs Persistent Storage*). | • **Stateless**: [app/main.py](file:///c:/261/CloudComputing/cloud-seminar/app/main.py), [ai_detector/detector.py](file:///c:/261/CloudComputing/cloud-seminar/ai_detector/detector.py)<br>• **Stateful Volumes**: `prometheus-data`, `grafana-data` trong [docker-compose.yml](file:///c:/261/CloudComputing/cloud-seminar/docker-compose.yml) |
 | **3** | **Mạng Đám mây & Khám phá Dịch vụ (SDN & Service Discovery)** | • Docker Bridge Network (`aiops-net`) đóng vai trò như một mạng ảo VPC thu nhỏ.<br>• Khám phá dịch vụ tự động qua Docker Embedded DNS (`127.0.0.11`) bằng tên service thay cho IP tĩnh. | • Mạng `aiops-net` trong [docker-compose.yml](file:///c:/261/CloudComputing/cloud-seminar/docker-compose.yml)<br>• DNS targets `app:8000`, `ai-detector:8001` trong [prometheus/prometheus.yml](file:///c:/261/CloudComputing/cloud-seminar/prometheus/prometheus.yml)<br>• URL `http://prometheus:9090` trong [ai_detector/detector.py](file:///c:/261/CloudComputing/cloud-seminar/ai_detector/detector.py) |
 | **4** | **Giám sát Đám mây & Viễn trắc (Observability & OpenMetrics)** | • 3 kiểu dữ liệu metric chuẩn OpenMetrics:<br>  - `Counter`: Lưu lượng request (RPS).<br>  - `Histogram`: Phân vị độ trễ $p_{50}, p_{90}, p_{99}$ đo lường **SLO/SLA**.<br>  - `Gauge`: Mức CPU, RAM tức thời.<br>• Thu thập dữ liệu theo mô hình Kéo (Pull-based Scrape). | • [app/main.py](file:///c:/261/CloudComputing/cloud-seminar/app/main.py) (khai báo `REQUEST_COUNTER`, `REQUEST_LATENCY`, `CPU_GAUGE`, endpoint `/metrics`)<br>• [prometheus/prometheus.yml](file:///c:/261/CloudComputing/cloud-seminar/prometheus/prometheus.yml) (`scrape_interval: 5s`) |
-| **5** | **Cơ sở dữ liệu Chuỗi thời gian (TSDB) & Alerting Engine** | • Lưu trữ chuỗi thời gian Append-only tối ưu nén Gorilla.<br>• Ghi nhật ký Write-Ahead Log (WAL) chống mất mát dữ liệu.<br>• Đánh giá luật cảnh báo (Alerting rules): So sánh Static Threshold vs AIOps Dynamic. | • [prometheus/prometheus.yml](file:///c:/261/CloudComputing/cloud-seminar/prometheus/prometheus.yml)<br>• [prometheus/alert.rules.yml](file:///c:/261/CloudComputing/cloud-seminar/prometheus/alert.rules.yml) (`StaticCpuHighAlert` vs `AIOpsDynamicAnomalyAlert`) |
+| **5** | **Cơ sở dữ liệu Chuỗi thời gian (TSDB) & Alerting Engine** | • Lưu trữ chuỗi thời gian Append-only tối ưu nén Gorilla.<br>• Ghi nhật ký Write-Ahead Log (WAL) chống mất mát dữ liệu.<br>• Prometheus đánh giá alert rules; Alertmanager nhóm và định tuyến thông báo qua webhook cục bộ. | • [prometheus/prometheus.yml](file:///c:/261/CloudComputing/cloud-seminar/prometheus/prometheus.yml)<br>• [prometheus/alert.rules.yml](file:///c:/261/CloudComputing/cloud-seminar/prometheus/alert.rules.yml)<br>• [alertmanager/alertmanager.yml](file:///c:/261/CloudComputing/cloud-seminar/alertmanager/alertmanager.yml) |
 | **6** | **Hạ tầng dưới dạng mã (IaC) & Observability-as-Code** | • Khai báo trạng thái mong muốn (Desired State) qua file cấu hình.<br>• Tự động nạp Datasource và Dashboard Grafana qua YAML, không cần cấu hình thủ công bằng tay (GitOps-ready). | • [docker-compose.yml](file:///c:/261/CloudComputing/cloud-seminar/docker-compose.yml)<br>• [grafana/provisioning/datasources/prometheus.yml](file:///c:/261/CloudComputing/cloud-seminar/grafana/provisioning/datasources/prometheus.yml)<br>• [grafana/provisioning/dashboards/dashboard.yml](file:///c:/261/CloudComputing/cloud-seminar/grafana/provisioning/dashboards/dashboard.yml)<br>• [grafana/dashboards/aiops_dashboard.json](file:///c:/261/CloudComputing/cloud-seminar/grafana/dashboards/aiops_dashboard.json) |
 | **7** | **Học máy Vận hành Đám mây (AIOps & Dynamic Detection)** | • Nhận diện sự cố ngầm định (**Gray Failure**): CPU ~42% (dưới ngưỡng 80%) nhưng Latency vọt x30 lần.<br>• Thuật toán **Isolation Forest** trên cửa sổ trượt (Sliding Window 5 phút) phân tích tương quan phi tuyến đa biến $(RPS, Latency, CPU)$. | • [ai_detector/detector.py](file:///c:/261/CloudComputing/cloud-seminar/ai_detector/detector.py) (hàm `build_feature_matrix()`, `train_and_score()`, model `IsolationForest`) |
 | **8** | **Tính Giải thích được của AI (XAI - Root Cause Analysis)** | • Xóa bỏ định kiến AI là "hộp đen".<br>• Phân rã độ lệch chuẩn $z_i = \frac{\|x_i - \mu_i\|}{\sigma_i}$ để định lượng % đóng góp nguyên nhân sự cố (chỉ ra Latency chiếm ~78%, CPU chiếm ~16%). | • [ai_detector/detector.py](file:///c:/261/CloudComputing/cloud-seminar/ai_detector/detector.py) (tính toán `attribution` gán vào metric `ai_feature_attribution`)<br>• Panel 5 (Bar Gauge) trong [grafana/dashboards/aiops_dashboard.json](file:///c:/261/CloudComputing/cloud-seminar/grafana/dashboards/aiops_dashboard.json) |
@@ -162,6 +162,52 @@ python traffic_sim.py --remediate
 ```
 - Hệ thống gửi tín hiệu đến `/api/remediate`, giải phóng bộ nhớ và khôi phục baseline an toàn. Panel 6 ghi nhận số lần phục hồi thành công.
 
+### 🚨 Demo Prometheus Alertmanager
+
+Luồng cảnh báo được hiện thực riêng với luồng remediation:
+
+```text
+App / AI Detector → Prometheus scrape metrics → Prometheus đánh giá alert rules
+                                                   ↓ alert firing/resolved
+                                         Alertmanager nhóm và định tuyến
+                                                   ↓ webhook
+                                      Local Alert Receiver (trang nhận alert)
+```
+
+Khởi động toàn bộ stack (receiver, Alertmanager, Prometheus, app, AI Detector và Grafana):
+
+```powershell
+docker-compose up -d --build
+```
+
+Mở các trang sau:
+
+- `http://localhost:9090/alerts`: trạng thái alert của Prometheus, gồm `pending` và `firing`.
+- `http://localhost:9093`: Alertmanager, nơi xem alert đã nhận, nhóm và silence.
+- `http://localhost:8081`: hộp thư webhook cục bộ, hiển thị alert đang firing và resolved.
+
+Prometheus đánh giá các luật trong `prometheus/alert.rules.yml` mỗi 5 giây. Hiện có các rule: app không scrape được, AI Detector không scrape được, latency trung bình trên 1 giây, CPU trên 80%, và AI anomaly score trên 0.70. Mỗi rule yêu cầu điều kiện kéo dài 10 giây (`for: 10s`) để tránh gửi cảnh báo vì một mẫu lỗi thoáng qua. Thời gian thực tế có thể lâu hơn do còn phụ thuộc lúc scrape/evaluate và `group_wait` của Alertmanager.
+
+Để trình diễn một alert chắc chắn, dừng app:
+
+```powershell
+docker-compose stop app
+```
+
+Sau khoảng 20 giây, `AppTargetDown` sẽ chuyển từ `pending` sang `firing`; Prometheus gửi alert đến Alertmanager, rồi webhook sẽ xuất hiện tại trang `localhost:8081`. Khởi động lại app để xem alert được gửi trạng thái resolved:
+
+```powershell
+docker-compose start app
+```
+
+Có thể xem log của hai thành phần xử lý thông báo bằng:
+
+```powershell
+docker-compose logs -f alertmanager alert-receiver
+```
+
+Trong demo này, Alertmanager gửi webhook đến receiver cục bộ, không gửi tin nhắn ra Telegram/Slack/email. Trang receiver giữ tối đa 200 sự kiện trong bộ nhớ của container; khởi động lại receiver sẽ xóa lịch sử hiển thị. Alertmanager nhận, nhóm và chuyển thông báo; nó không tự sửa app và không thay thế lệnh remediation của `run_demo.py`.
+
 ---
 
 ## 📁 Cấu trúc Thư mục Dự án
@@ -173,7 +219,7 @@ cloud-seminar/
 ├── start_demo.py               # ⚡ [Python Master] Tự động hóa đa nền tảng
 ├── run_demo.py                 # [Demo Runner] Điều phối kịch bản 5 giai đoạn
 ├── traffic_sim.py              # [Chaos Engine] Bơm tải normal, anomaly, chaos
-├── docker-compose.yml          # Cấu hình Orchestration cho 4 microservices
+├── docker-compose.yml          # Orchestration cho app, AI, monitoring và alert receiver
 ├── README.md                   # Tài liệu triển khai & hướng dẫn vận hành dự án
 ├── INSTRUCTION.md              # Tài liệu kỹ thuật chi tiết & lý thuyết giải thích sâu
 ├── app/
@@ -184,9 +230,14 @@ cloud-seminar/
 │   ├── Dockerfile              # Container đóng gói AIOps Worker (Scikit-Learn)
 │   ├── detector.py             # Isolation Forest: Sliding Window, XAI RCA, Drift Shield, Auto-Heal
 │   └── requirements.txt        # flask, scikit-learn, numpy, requests, prometheus-client
+├── alertmanager/
+│   └── alertmanager.yml        # Gom nhóm và route alert tới webhook receiver
+├── alert_receiver/
+│   ├── Dockerfile              # Image nhỏ cho webhook receiver cục bộ
+│   └── receiver.py             # Nhận và hiển thị alert/resolved trong trang demo
 ├── prometheus/
 │   ├── prometheus.yml          # Cấu hình scrape targets (chu kỳ 5s) & nạp rules
-│   └── alert.rules.yml         # Luật cảnh báo: Static Alert (CPU > 80%) vs AIOps Dynamic Alert
+│   └── alert.rules.yml         # Luật cảnh báo cho target down, latency, CPU và AI score
 └── grafana/
     ├── provisioning/
     │   ├── datasources/

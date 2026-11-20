@@ -26,6 +26,8 @@ RESET   = "\033[0m"
 APP_URL        = "http://localhost:8000"
 PROMETHEUS_URL = "http://localhost:9090"
 AI_URL         = "http://localhost:8001"
+ALERTMANAGER_URL = "http://localhost:9093"
+ALERT_RECEIVER_URL = "http://localhost:8081"
 
 
 class ContinuousTrafficGenerator:
@@ -77,7 +79,7 @@ def print_banner():
     print(f"""
 {CYAN}{BOLD}========================================================================
 AIOps Cloud Monitoring Demo - SRE Terminal Runner
-FastAPI Microservice | Prometheus TSDB | Isolation Forest | Grafana
+FastAPI | Prometheus | Isolation Forest | Alertmanager | Grafana
 ========================================================================{RESET}""")
 
 
@@ -86,7 +88,9 @@ def check_prerequisites():
     services = [
         ("App Service (:8000)", f"{APP_URL}/health"),
         ("Prometheus (:9090)", f"{PROMETHEUS_URL}/-/healthy"),
-        ("AI Detector (:8001)", f"{AI_URL}/health")
+        ("AI Detector (:8001)", f"{AI_URL}/health"),
+        ("Alertmanager (:9093)", f"{ALERTMANAGER_URL}/-/healthy"),
+        ("Alert Receiver (:8081)", f"{ALERT_RECEIVER_URL}/health")
     ]
     for name, url in services:
         try:

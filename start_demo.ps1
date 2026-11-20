@@ -26,7 +26,7 @@ Write-Host "  [OK] Docker engine is running." -ForegroundColor Green
 
 # 2. Launch 4 Microservices via Docker Compose
 Write-Host ""
-Write-Host "[2/4] Starting 4 microservices (App, AI Detector, Prometheus, Grafana)..." -ForegroundColor Yellow
+Write-Host "[2/4] Starting 6 services (App, AI Detector, Prometheus, Alertmanager, Receiver, Grafana)..." -ForegroundColor Yellow
 docker-compose up -d --build
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Failed to start docker-compose!" -ForegroundColor Red
@@ -45,8 +45,10 @@ for ($i = 1; $i -le $maxRetries; $i++) {
         $appResp = Invoke-WebRequest -Uri "http://localhost:8000/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
         $promResp = Invoke-WebRequest -Uri "http://localhost:9090/-/healthy" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
         $aiResp = Invoke-WebRequest -Uri "http://localhost:8001/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
+        $alertmanagerResp = Invoke-WebRequest -Uri "http://localhost:9093/-/healthy" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
+        $receiverResp = Invoke-WebRequest -Uri "http://localhost:8081/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
         
-        if ($appResp.StatusCode -eq 200 -and $promResp.StatusCode -eq 200 -and $aiResp.StatusCode -eq 200) {
+        if ($appResp.StatusCode -eq 200 -and $promResp.StatusCode -eq 200 -and $aiResp.StatusCode -eq 200 -and $alertmanagerResp.StatusCode -eq 200 -and $receiverResp.StatusCode -eq 200) {
             $ready = $true
             break
         }
@@ -57,7 +59,7 @@ for ($i = 1; $i -le $maxRetries; $i++) {
 Write-Host ""
 
 if ($ready) {
-    Write-Host "  [OK] All 4 microservices are healthy and operational." -ForegroundColor Green
+    Write-Host "  [OK] Application, monitoring and alerting services are healthy." -ForegroundColor Green
 } else {
     Write-Host "  [WARN] Proceeding with connection..." -ForegroundColor Yellow
 }
@@ -66,6 +68,7 @@ if ($ready) {
 Write-Host ""
 Write-Host "[4/4] Opening Grafana Dashboard in browser (http://localhost:3000)..." -ForegroundColor Green
 Start-Process "http://localhost:3000"
+Start-Process "http://localhost:8081"
 Start-Sleep -Seconds 2
 
 # 5. Launch interactive demo

@@ -34,6 +34,34 @@ services:
     environment:
       - PYTHONUNBUFFERED=1 # Hiển thị log ngay lập tức (quan trọng khi demo)
 
+  # Local webhook destination used to demonstrate Alertmanager notifications.
+  alert-receiver:
+    build: ./alert_receiver
+    container_name: aiops-alert-receiver
+    ports:
+      - "127.0.0.1:8081:8081"
+    networks:
+      - aiops-net
+    restart: unless-stopped
+
+  # Receives Prometheus alerts and routes them to the local webhook receiver.
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: aiops-alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    networks:
+      - aiops-net
+    depends_on:
+      - alert-receiver
+    restart: unless-stopped
+
   # ============================================================
   # Service 3: Prometheus (TSDB & Scraper)
   # ============================================================
@@ -49,6 +77,8 @@ services:
       - prometheus-data:/prometheus
     networks:
       - aiops-net
+    depends_on:
+      - alertmanager
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -99,6 +129,8 @@ volumes:
   prometheus-data:
     driver: local
   grafana-data:
+    driver: local
+  alertmanager-data:
     driver: local
 
 # ============================================================

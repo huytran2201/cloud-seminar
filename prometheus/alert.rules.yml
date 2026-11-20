@@ -1,0 +1,55 @@
+groups:
+  - name: service-health
+    rules:
+      - alert: AppTargetDown
+        expr: up{job="app"} == 0
+        for: 10s
+        labels:
+          severity: critical
+          service: app
+        annotations:
+          summary: "Application target is unreachable"
+          description: "Prometheus has failed to scrape {{ $labels.instance }} for at least 10 seconds."
+
+      - alert: AIDetectorTargetDown
+        expr: up{job="ai-detector"} == 0
+        for: 10s
+        labels:
+          severity: critical
+          service: ai-detector
+        annotations:
+          summary: "AI Detector target is unreachable"
+          description: "Prometheus has failed to scrape {{ $labels.instance }} for at least 10 seconds."
+
+      - alert: HighRequestLatency
+        expr: |
+          sum(rate(app_request_latency_seconds_sum[30s]))
+          /
+          sum(rate(app_request_latency_seconds_count[30s])) > 1
+        for: 10s
+        labels:
+          severity: warning
+          service: app
+        annotations:
+          summary: "Average request latency is above 1 second"
+          description: "The observed average latency is {{ $value | humanize }} seconds."
+
+      - alert: HighCPUUsage
+        expr: app_simulated_cpu_percent{job="app"} > 80
+        for: 10s
+        labels:
+          severity: warning
+          service: app
+        annotations:
+          summary: "Application CPU is above the 80% threshold"
+          description: "The simulated CPU gauge is {{ $value | humanize }} percent."
+
+      - alert: AIOpsAnomalyDetected
+        expr: ai_anomaly_score{job="ai-detector"} > 0.70
+        for: 10s
+        labels:
+          severity: warning
+          service: ai-detector
+        annotations:
+          summary: "AIOps anomaly score crossed 0.70"
+          description: "The current anomaly score is {{ $value | humanize }}."

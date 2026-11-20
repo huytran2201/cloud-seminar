@@ -291,7 +291,8 @@ python run_demo.py --interactive
    - Sử dụng Sidecar Envoy Proxy để thu thập dữ liệu viễn trắc tầng mạng L7 (mTLS, HTTP request status, latency) tự động 100% mà không cần sửa đổi bất kỳ dòng code nào trong ứng dụng gốc.
    - Khi AI phát hiện anomaly score vọt cao, tự động điều khiển Envoy Proxy áp dụng cơ chế **Circuit Breaking** (Ngắt mạch) hoặc **Rate Limiting** để bảo vệ hạ tầng backend.
 4. **Hệ thống Thông báo Thời gian thực (Alertmanager Webhook):**
-   - Kết nối Prometheus Alertmanager với các kênh giao tiếp vận hành thực tế như Telegram Bot, Slack Webhook, hoặc PagerDuty để thông báo trực tiếp đến điện thoại của kỹ sư trực On-call SRE.
+   - Đồ án hiện đã có Prometheus alert rules, Alertmanager routing và webhook receiver cục bộ để mô phỏng việc nhận cảnh báo; xem `prometheus/alert.rules.yml`, `alertmanager/alertmanager.yml` và `alert_receiver/`.
+   - Hướng nâng cấp production là thay receiver demo bằng kênh vận hành thực tế như Telegram Bot, Slack Webhook hoặc PagerDuty, đồng thời quản lý token/URL bí mật ngoài file cấu hình được commit.
 
 ---
 *Tài liệu này được biên soạn bởi Nhóm 08 - Bộ môn Điện toán đám mây (CO3059) - Trường Đại học Bách Khoa - ĐHQG TP. Hồ Chí Minh.*

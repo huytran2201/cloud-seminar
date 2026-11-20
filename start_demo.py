@@ -4,8 +4,8 @@ start_demo.py - 1-Click Master Runner for AIOps Cloud Demo
 Automates:
   1. Docker Engine verification
   2. docker-compose up -d --build
-  3. Microservices healthcheck polling
-  4. Auto-launch Grafana Dashboard in browser (http://localhost:3000)
+  3. Application, monitoring and alerting healthcheck polling
+  4. Auto-launch Grafana and local Alert Receiver in browser
   5. Interactive 5-phase SRE demonstration (run_demo.py --interactive)
 """
 
@@ -45,7 +45,7 @@ Workflow: Docker Services -> Open Grafana Browser -> Interactive Demo
         sys.exit(1)
 
     # 2. Launch docker-compose
-    print(f"{YELLOW}[2/4] Starting 4 microservices (App, AI Detector, Prometheus, Grafana)...{RESET}")
+    print(f"{YELLOW}[2/4] Starting 6 services (App, AI Detector, Prometheus, Alertmanager, Receiver, Grafana)...{RESET}")
     compose_res = subprocess.run(["docker-compose", "up", "-d", "--build"])
     if compose_res.returncode != 0:
         print(f"  {RED}[ERROR] Failed to start docker-compose!{RESET}")
@@ -60,7 +60,9 @@ Workflow: Docker Services -> Open Grafana Browser -> Interactive Demo
             r1 = requests.get("http://localhost:8000/health", timeout=2)
             r2 = requests.get("http://localhost:9090/-/healthy", timeout=2)
             r3 = requests.get("http://localhost:8001/health", timeout=2)
-            if r1.status_code == 200 and r2.status_code == 200 and r3.status_code == 200:
+            r4 = requests.get("http://localhost:9093/-/healthy", timeout=2)
+            r5 = requests.get("http://localhost:8081/health", timeout=2)
+            if all(r.status_code == 200 for r in (r1, r2, r3, r4, r5)):
                 ready = True
                 break
         except Exception:
@@ -70,13 +72,14 @@ Workflow: Docker Services -> Open Grafana Browser -> Interactive Demo
     print()
 
     if ready:
-        print(f"  {GREEN}[OK] All 4 microservices are healthy and operational.{RESET}\n")
+        print(f"  {GREEN}[OK] Application, monitoring and alerting services are healthy.{RESET}\n")
     else:
         print(f"  {YELLOW}[WARN] Services taking longer to respond, proceeding with connection...{RESET}\n")
 
     # 4. Open Grafana
     print(f"{GREEN}[4/4] Opening Grafana Dashboard in default browser (http://localhost:3000)...{RESET}\n")
     webbrowser.open("http://localhost:3000")
+    webbrowser.open("http://localhost:8081")
     time.sleep(2)
 
     # 5. Execute interactive demo
