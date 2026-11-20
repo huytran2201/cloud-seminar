@@ -39,7 +39,7 @@ services:
     build: ./alert_receiver
     container_name: aiops-alert-receiver
     ports:
-      - "127.0.0.1:8081:8081"
+      - "127.0.0.1::8081"
     networks:
       - aiops-net
     restart: unless-stopped

@@ -1,4 +1,6 @@
 
+> **Đọc nhanh:** README.md dành cho người clone muốn cài và chạy demo. Tài liệu này giải thích sâu kiến trúc và thuật toán. Implementation hiện tại dùng metric CPU/RAM giả lập, target scrape tĩnh và remediation mô phỏng; kết quả kịch bản không phải benchmark production.
+
 ## MỤC LỤC TỔNG QUAN
 1. [Bối cảnh SRE, Cloud-Native và Bài toán Gray Failure](#1-bối-cảnh-sre-cloud-native-và-bài-toán-gray-failure)
 2. [Kiến trúc Cloud-Native Microservices Phân tán](#2-kiến-trúc-cloud-native-microservices-phân-tán)
@@ -22,7 +24,7 @@ Trong kỹ nghệ độ tin cậy hệ thống (SRE), các sự cố được ch
 1. **Crash Failure / Hard Failure (Sập cứng):** Tiến trình chết (Exit code 1, OOMKilled, CrashLoopBackOff), port bị đóng hoặc trả về mã lỗi `HTTP 500`. Dạng sự cố này cực kỳ dễ phát hiện thông qua Healthcheck probe đơn giản.
 2. **Gray Failure (Lỗi xám / Suy thoái ngầm):**
    - Tiến trình vẫn sống bình thường, endpoint trả về mã `HTTP 200 OK`.
-   - Mức tiêu thụ CPU chỉ ở mức trung bình $\sim 40 - 45\%$ (hoàn toàn không chạm ngưỡng cảnh báo tĩnh $80\%$).
+   - Metric CPU giả lập chỉ ở mức trung bình $\sim 40 - 45\%$ (hoàn toàn không chạm ngưỡng cảnh báo tĩnh $80\%$).
    - Tuy nhiên, **Độ trễ xử lý (Latency)** bị giật cục từ $30\text{ms}$ vọt lên $1.5 - 3.0\text{s}$ do nghẽn hàng đợi nội bộ, tranh chấp luồng (Thread Contention), rò rỉ bộ nhớ vi mô hoặc nghẽn Database Connection Pool.
 
 ```
@@ -48,7 +50,7 @@ $\implies$ **Giải pháp:** Áp dụng **AIOps (Artificial Intelligence for IT 
 
 ## 2. Kiến trúc Cloud-Native Microservices Phân tán
 
-Hệ thống được thiết kế theo kiến trúc Microservices phân tán độc lập, đóng gói hoàn toàn trong Docker Containers thông qua [docker-compose.yml](file:///c:/261/CloudComputing/cloud-seminar/docker-compose.yml):
+Hệ thống được thiết kế theo kiến trúc Microservices phân tán độc lập, đóng gói hoàn toàn trong Docker Containers thông qua [docker-compose.yml](./docker-compose.yml):
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────┐
@@ -107,9 +109,10 @@ Hệ thống được thiết kế theo kiến trúc Microservices phân tán đ
   - Prometheus scrape `http://app:8000/metrics` và `http://ai-detector:8001/metrics`.
   - AI Detector query chuỗi thời gian từ `http://prometheus:9090/api/v1/query_range`.
   - AI Detector gửi webhook phục hồi tới `http://app:8000/api/remediate`.
+  - Docker DNS phân giải các tên này tự động, nhưng danh sách scrape target Prometheus nằm tĩnh trong `prometheus/prometheus.yml`; thêm target vẫn cần sửa `static_configs`.
 
 ### 2.3. Ràng buộc Khởi động (Healthcheck Chains)
-Để tránh tình trạng "Race Condition" lúc khởi động (AI Detector gọi Prometheus khi server TSDB chưa sẵn sàng), [docker-compose.yml](file:///c:/261/CloudComputing/cloud-seminar/docker-compose.yml) thiết lập cấu hình:
+Để tránh tình trạng "Race Condition" lúc khởi động (AI Detector gọi Prometheus khi server TSDB chưa sẵn sàng), [docker-compose.yml](./docker-compose.yml) thiết lập cấu hình:
 ```yaml
 depends_on:
   prometheus:
@@ -125,14 +128,14 @@ Prometheus phải vượt qua kiểm tra sức khỏe HTTP probe (`wget --spider
 Microservice nghiệp vụ xây dựng trên nền tảng **FastAPI**, mô phỏng môi trường vi dịch vụ thực tế:
 - **Endpoints:**
   - `GET /api/process?mode=normal|anomaly|memory_leak|jitter|error_burst`: Xử lý yêu cầu với các hành vi tải khác nhau.
-  - `POST /api/remediate`: Endpoint tự phục hồi (Self-Healing), reset mức RAM về $128\text{MB}$, đưa CPU về $20\%$, giải phóng thread contention.
+  - `POST /api/remediate`: Endpoint remediation mô phỏng: đặt lại RAM giả lập về $128\text{MB}$, CPU giả lập về $20\%$ và tắt cờ anomaly override.
   - `GET /metrics`: Endpoint phơi dữ liệu chuẩn OpenMetrics cho Prometheus cào dữ liệu.
   - `GET /health`: Healthcheck probe xác nhận container hoạt động.
 - **Các loại Metrics phơi ra (OpenMetrics Standard):**
   - `app_requests_total` (**Counter**): Đếm tổng số lượng request theo nhãn `mode`.
   - `app_request_latency_seconds` (**Histogram**): Đo độ trễ với 9 buckets: `[0.05, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0]`. Là cơ sở tính toán phân vị độ trễ $p_{50}, p_{90}, p_{99}$ trong SRE.
-  - `app_simulated_cpu_percent` (**Gauge**): Báo cáo mức CPU hiện thời của container.
-  - `app_simulated_memory_mb` (**Gauge**): Báo cáo dung lượng RAM tiêu thụ.
+  - `app_simulated_cpu_percent` (**Gauge**): Giá trị CPU giả lập do app tự đặt, không phải CPU thật của host/container.
+  - `app_simulated_memory_mb` (**Gauge**): Giá trị RAM giả lập do app tự đặt.
   - `app_remediation_total` (**Counter**): Đếm tổng số lần hệ thống tự phục hồi thành công qua Self-Healing.
 
 ### 3.2. AIOps Worker (`ai_detector/detector.py`)
@@ -144,7 +147,7 @@ Là tiến trình phân tích thông minh hoạt động ở chế độ nền (
 - **Cơ chế Cold-Start (Khởi động lạnh):** Khi hệ thống vừa bật, Prometheus chưa đủ $20$ điểm thời gian (`MIN_POINTS = 20`), hàm `generate_baseline_data()` tự sinh tập dữ liệu chuẩn Gaussian $(\mu_{\text{rps}}=0.5, \mu_{\text{lat}}=0.05\text{s}, \mu_{\text{cpu}}=20\%)$ để mô hình có dữ liệu tham chiếu ngay lập tức, không gây treo hệ thống.
 - **Chống nhiễm độc Baseline (Drift / Poisoning Prevention):** Nếu xảy ra sự cố kéo dài (ví dụ chạy anomaly liên tục 5 phút), các điểm lỗi sẽ chiếm đa số trong cửa sổ trượt khiến mô hình tự "bình thường hóa" cái sai. Hệ thống tự động kích hoạt **Golden Baseline Injection** (`np.vstack([golden_baseline, real_data])`), bảo toàn ký ức lành mạnh của hệ thống.
 - **XAI Feature Attribution (Root Cause Analysis - RCA):** Bóc tách độ lệch chuẩn $z_i$ để tính toán tỷ lệ đóng góp của từng đặc trưng vào sự cố, phơi ra qua metric `ai_feature_attribution{feature="latency|cpu|request_rate"}`.
-- **Closed-Loop Remediation:** Khi `is_anomaly == 1` liên tục trong 3 chu kỳ ($15\text{s}$), tự động bắn webhook HTTP POST tới `http://app:8000/api/remediate` để tự động hóa xử lý sự cố.
+- **Auto-remediation demo:** Khi `is_anomaly == 1` liên tục trong 20 chu kỳ ($100\text{s}$), AI Detector POST tới `http://app:8000/api/remediate`. Endpoint chỉ đặt lại metric/trạng thái mô phỏng; không restart container hoặc sửa hạ tầng thật. Phase 4 của `run_demo.py` cũng gọi endpoint này trực tiếp.
 
 ### 3.3. Prometheus Engine (`prometheus/`)
 - **Mô hình Thu thập (Pull-based Model):** Định kỳ $5\text{s}$, Prometheus chủ động gửi HTTP GET tới cổng `/metrics` của từng container.
@@ -152,11 +155,11 @@ Là tiến trình phân tích thông minh hoạt động ở chế độ nền (
 - **Cơ sở dữ liệu chuỗi thời gian (TSDB):**
   - Dữ liệu được nén theo thuật toán Gorilla (Delta-of-delta timestamp và XOR floating-point values), tối ưu hóa dung lượng lưu trữ trên disk.
   - Sử dụng Write-Ahead Log (WAL) để chống mất mát dữ liệu khi container bị tắt đột ngột.
-- **Hệ thống Alerting Rules ([alert.rules.yml](file:///c:/261/CloudComputing/cloud-seminar/prometheus/alert.rules.yml)):**
-  - **Rule 1 (Cảnh báo tĩnh):** `app_simulated_cpu_percent > 80` (trạng thái: **INACTIVE** khi có Gray Failure).
-  - **Rule 2 (Cảnh báo AIOps động):** `ai_anomaly_score > 0.7 for 10s` (trạng thái: **FIRING** ngay khi có suy thoái hiệu năng).
+- **Hệ thống Alerting Rules ([alert.rules.yml](./prometheus/alert.rules.yml)):** gồm target down, latency trung bình trên 1 giây, CPU giả lập trên 80% và AI anomaly score trên 0.70; mỗi rule yêu cầu điều kiện tồn tại 10 giây.
+  - `HighRequestLatency` là cảnh báo ngưỡng latency, độc lập với AI. Vì vậy Gray Failure có thể làm cảnh báo latency firing dù CPU dưới 80%.
+  - `AIOpsAnomalyDetected` là cảnh báo riêng dựa trên score AI > 0.70.
 
-### 3.4. Grafana Visualization ([grafana/dashboards/aiops_dashboard.json](file:///c:/261/CloudComputing/cloud-seminar/grafana/dashboards/aiops_dashboard.json))
+### 3.4. Grafana Visualization ([grafana/dashboards/aiops_dashboard.json](./grafana/dashboards/aiops_dashboard.json))
 Tự động nạp cấu hình qua YAML (Observability-as-Code), trực quan hóa 6 Panels chuyên nghiệp:
 - **Panel 1 (CPU Usage vs 80% Threshold):** Thể hiện sự bất lực của giám sát truyền thống khi CPU chỉ ở mức $\sim 42\%$.
 - **Panel 2 (Request Latency Time-Series):** Hiển thị rõ độ trễ giật cục từ $40\text{ms}$ vọt lên $2.5\text{s}$.
@@ -202,7 +205,7 @@ Trong Scikit-Learn, hàm `decision_function()` trả về giá trị thô:
 $$\text{raw\_score} \in (-\infty, +\infty)$$
 *(Giá trị âm biểu thị bất thường, giá trị dương biểu thị bình thường).*
 
-Trong [ai_detector/detector.py](file:///c:/261/CloudComputing/cloud-seminar/ai_detector/detector.py), thuật toán áp dụng ánh xạ hàm Sigmoid nghịch đảo có trọng số để đưa về thang đo xác suất $[0.0, 1.0]$:
+Trong [ai_detector/detector.py](./ai_detector/detector.py), thuật toán áp dụng ánh xạ hàm Sigmoid nghịch đảo có trọng số để đưa về thang điểm chuẩn hóa $[0.0, 1.0]$ (không phải xác suất đã hiệu chỉnh):
 $$\text{ai\_anomaly\_score} = \frac{1}{1 + e^{5.0 \times \text{raw\_score}}}$$
 - Khi $\text{raw\_score} \ll 0$ (rất bất thường) $\implies e^{5.0 \times \text{raw\_score}} \to 0 \implies \text{score} \to 1.0$.
 - Khi $\text{raw\_score} \gg 0$ (rất bình thường) $\implies e^{5.0 \times \text{raw\_score}} \to \infty \implies \text{score} \to 0.0$.
@@ -223,32 +226,28 @@ $$\text{Latency Attribution} \approx 78\%, \quad \text{CPU Attribution} \approx 
 
 | Chỉ số SRE | Giám sát Ngưỡng tĩnh (Cũ) | Hệ thống AIOps Dynamic (Mới) | Lợi ích Đạt được |
 |:---|:---:|:---:|:---|
-| **MTTD (Mean Time to Detect)** | $\infty$ (Không phát hiện) | **$10 - 15$ giây** (Sau 2-3 chu kỳ scrape) | Giảm thời gian phát hiện từ vô hạn xuống vài giây |
-| **MTTR (Mean Time to Recover)** | $15 - 30$ phút (Chờ kỹ sư can thiệp) | **$1 - 2$ giây** (Closed-Loop Webhook) | Tự động hóa phục hồi tức thời |
-| **Tỷ lệ Báo động giả (False Positives)** | Cao (Alert khi có burst tải hợp lệ) | Thấp (Mô hình học đa biến thích ứng) | Chấm dứt tình trạng Alert Fatigue |
-| **Tỷ lệ Bỏ sót sự cố (False Negatives)** | $100\%$ đối với Gray Failures | $\sim 0\%$ (Phát hiện tương quan lệch chuẩn) | Bảo vệ toàn vẹn dịch vụ |
-| **Bảo vệ Ngân sách Lỗi (Error Budget)** | Bị đốt cháy hoàn toàn âm thầm | Được bảo toàn tối đa | Đảm bảo đạt cam kết **SLA 99.9%** |
+| **MTTD (Mean Time to Detect)** | Chưa đo trong dự án | Rule cần giữ điều kiện 10 giây, cộng chu kỳ scrape/evaluation và group wait | Cấu hình minh họa luồng alert, chưa phải benchmark |
+| **MTTR (Mean Time to Recover)** | Chưa đo trong dự án | Phase 4 gọi endpoint reset trạng thái mô phỏng | Không phải thời gian khôi phục production |
+| **False Positives / False Negatives** | Chưa đánh giá thống kê | Có ví dụ kịch bản CPU threshold và AI score | Cần tập dữ liệu lớn hơn để kết luận tỷ lệ |
+| **Error Budget / SLA** | Chưa triển khai | Chưa tính error budget hoặc xác minh SLA 99.9% | Có thể phát triển thêm sau demo |
 
 ---
 
 ## 6. Runbook Vận hành và Kịch bản Thuyết trình Mẫu (Demo Playbook)
 
 ### 6.1. Hướng dẫn Khởi động Hạ tầng
-1. Mở **Docker Desktop** trên máy host.
-2. Tại thư mục `cloud-seminar`, khởi động toàn bộ cụm container:
-   ```powershell
-   docker-compose up -d --build
-   ```
-3. Kiểm tra container: `docker-compose ps` (Phải thấy cả 4 services đều `Up`).
-4. Truy cập Grafana: `http://localhost:3000` (Tài khoản: `admin` / `admin123`).
+1. Làm theo phần Quick Start trong README để tạo `.venv` và cài `requests`.
+2. Mở **Docker Desktop**, vào thư mục `cloud-seminar` rồi chạy `start_demo.bat`. Lệnh này build stack, chờ các endpoint health, mở Grafana/Prometheus/Alertmanager/receiver và chạy demo tương tác.
+3. Có 6 services: app, AI Detector, Prometheus, Alertmanager, receiver và Grafana. Kiểm tra bằng `docker-compose ps`.
+4. Grafana ở `http://localhost:3000` (tài khoản `admin` / `admin123`). Receiver dùng cổng host động; lấy URL từ dòng in trong terminal.
 
 ---
 
 ### 6.2. Kịch bản Thuyết trình Mẫu 3 Phút (Dành cho Sinh viên Báo cáo Hội đồng)
 
-Sử dụng công cụ điều phối 1-Click [run_demo.py](file:///c:/261/CloudComputing/cloud-seminar/run_demo.py) ở chế độ tương tác:
+`start_demo.bat` tự khởi động stack và gọi runner ở chế độ tương tác. Nếu stack đã chạy và chỉ muốn chạy lại kịch bản, dùng:
 ```powershell
-python run_demo.py --interactive
+.\.venv\Scripts\python.exe run_demo.py --interactive
 ```
 
 #### ⏱️ Phút 0:00 - 0:45 | Giai đoạn 1: Thiết lập Golden Baseline
@@ -259,8 +258,7 @@ python run_demo.py --interactive
 #### ⏱️ Phút 0:45 - 1:30 | Giai đoạn 2: Tiêm lỗi Gray Failure
 - **Hành động trên terminal:** Nhấn `[Enter]` để kích hoạt Phase 2 (`mode=anomaly`).
 - **Lời thoại thuyết trình trước Hội đồng:**
-  > *"Bây giờ, nhóm tiến hành tiêm sự cố Gray Failure vào hệ thống. Mời Thầy quan sát kỹ Panel 1 (CPU Usage): CPU chỉ nhích lên mức 42%, hoàn toàn nằm dưới đường vạch đỏ của ngưỡng tĩnh 80%. Điều này đồng nghĩa với việc các hệ thống cảnh báo truyền thống hoàn toàn bị 'mù' và bỏ sót sự cố này!
-  > Tuy nhiên tại Panel 2, độ trễ thực tế của người dùng đã bị giật cục nghiêm trọng lên tới 2.5 giây. Chỉ sau 10 giây (2 chu kỳ scrape), tại Panel 3, thuật toán Isolation Forest nhận ra rằng sự kết hợp giữa CPU 42% và Latency 2.5s là một phân bố cực kỳ dị thường so với lịch sử, lập tức kéo điểm AI Score vọt lên trên 0.85 và chuyển Panel 4 sang trạng thái BÁO ĐỘNG ĐỎ!"*
+  > *"Bây giờ nhóm tiêm Gray Failure. Panel 1 cho thấy CPU giả lập khoảng 42%, dưới ngưỡng CPU 80%, nên rule CPU không cảnh báo. Panel 2 cho thấy latency tăng; rule `HighRequestLatency` của Prometheus có thể cảnh báo độc lập với AI. Khi dữ liệu lệch khỏi baseline, AI score có thể vượt 0.70 và Panel 4 chuyển sang trạng thái bất thường. Giá trị và thời điểm cụ thể có thể thay đổi giữa các lần chạy."*
 
 #### ⏱️ Phút 1:30 - 2:00 | Giai đoạn 3: Phân tích Nguyên nhân Gốc rễ (XAI RCA)
 - **Hành động trên terminal:** Nhấn `[Enter]` để truy vấn metrics XAI từ Prometheus.
@@ -270,11 +268,11 @@ python run_demo.py --interactive
 #### ⏱️ Phút 2:00 - 2:30 | Giai đoạn 4: Closed-Loop Remediation (Self-Healing)
 - **Hành động trên terminal:** Nhấn `[Enter]` để kích hoạt Webhook tự chữa lành.
 - **Lời thoại thuyết trình trước Hội đồng:**
-  > *"Hệ thống không chỉ dừng lại ở mức phát hiện mà còn hoàn thiện chu trình tự trị khép kín (Closed-Loop). Khi nhận thấy trạng thái bất thường kéo dài trên 15 giây, AI Detector đã tự động phát tín hiệu Webhook tới endpoint `/api/remediate` để giải phóng thread pool và đặt lại trạng thái lành mạnh cho microservice. Ngay lập tức, Panel 6 ghi nhận hành động Self-Healing thành công và toàn bộ đồ thị trên Grafana đã hạ nhiệt về dải màu xanh an toàn!"*
+  > *"Hệ thống không chỉ dừng lại ở mức phát hiện mà còn hoàn thiện chu trình tự trị khép kín (Closed-Loop). Phase 4 của demo runner chủ động POST tới `/api/remediate` để reset trạng thái metric mô phỏng. AI Detector có một nhánh auto-remediation riêng sau 20 chu kỳ anomaly liên tiếp (~100 giây); đây không phải hành động sửa hoặc restart hạ tầng thật. Ngay lập tức, Panel 6 ghi nhận hành động Self-Healing thành công và toàn bộ đồ thị trên Grafana đã hạ nhiệt về dải màu xanh an toàn!"*
 
 #### ⏱️ Phút 2:30 - 3:00 | Giai đoạn 5: Tổng kết
 - **Lời thoại thuyết trình trước Hội đồng:**
-  > *"Tóm lại, thông qua đồ án này, nhóm đã chứng minh được: Trong môi trường Điện toán đám mây phân tán, giám sát hành vi động bằng AIOps là xu thế tất yếu thay thế cho các luật ngưỡng tĩnh cứng nhắc, giúp bảo vệ toàn vẹn cam kết dịch vụ SLO và tối ưu hóa chi phí vận hành cho doanh nghiệp. Nhóm xin chân thành cảm ơn Thầy và các bạn đã lắng nghe!"*
+  > *"Tóm lại, demo cho thấy giám sát AI có thể bổ sung góc nhìn đa biến bên cạnh các rule ngưỡng như CPU và latency. Đây là prototype mô phỏng để minh họa phát hiện và remediation; muốn dùng production cần đánh giá dữ liệu, SLO và hành động phục hồi thực tế. Nhóm xin cảm ơn Thầy và các bạn đã lắng nghe!"*
 
 ---
 

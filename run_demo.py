@@ -13,6 +13,8 @@ import sys
 import time
 import threading
 import argparse
+import subprocess
+import re
 import requests
 
 # ANSI Styling
@@ -20,14 +22,16 @@ GREEN   = "\033[92m"
 RED     = "\033[91m"
 YELLOW  = "\033[93m"
 CYAN    = "\033[96m"
+MAGENTA = "\033[95m"
 BOLD    = "\033[1m"
 RESET   = "\033[0m"
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+ANSI_TOKENS = re.compile(r"(\x1b\[[0-?]*[ -/]*[@-~])")
 
 APP_URL        = "http://localhost:8000"
 PROMETHEUS_URL = "http://localhost:9090"
 AI_URL         = "http://localhost:8001"
 ALERTMANAGER_URL = "http://localhost:9093"
-ALERT_RECEIVER_URL = "http://localhost:8081"
 
 
 class ContinuousTrafficGenerator:
@@ -85,12 +89,31 @@ FastAPI | Prometheus | Isolation Forest | Alertmanager | Grafana
 
 def check_prerequisites():
     """Verify connectivity to all required services."""
+    try:
+        port_result = subprocess.run(
+            ["docker-compose", "port", "alert-receiver", "8081"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        port_binding = next(line.strip() for line in port_result.stdout.splitlines() if line.strip())
+        host_port = port_binding.rsplit(":", 1)[-1]
+        if not host_port.isdigit():
+            raise ValueError(f"Unexpected docker-compose port output: {port_binding}")
+        alert_receiver_url = f"http://127.0.0.1:{host_port}"
+    except Exception as e:
+        print(f"  {RED}[FAIL] Alert Receiver: Cannot determine the published port ({e}){RESET}")
+        print(f"      {BOLD}docker-compose up -d --build alert-receiver alertmanager{RESET}\n")
+        sys.exit(1)
+    print(f"  {CYAN}[INFO] Alert Receiver: {alert_receiver_url}{RESET}")
+
     services = [
         ("App Service (:8000)", f"{APP_URL}/health"),
         ("Prometheus (:9090)", f"{PROMETHEUS_URL}/-/healthy"),
         ("AI Detector (:8001)", f"{AI_URL}/health"),
         ("Alertmanager (:9093)", f"{ALERTMANAGER_URL}/-/healthy"),
-        ("Alert Receiver (:8081)", f"{ALERT_RECEIVER_URL}/health")
+        (f"Alert Receiver (host :{host_port})", f"{alert_receiver_url}/health")
     ]
     for name, url in services:
         try:
@@ -116,15 +139,72 @@ def query_prometheus(query: str):
         return []
 
 
-def progress_bar(total_seconds: float, label: str):
-    """Clean ASCII progress bar."""
+def fit_ansi(text: str, width: int) -> str:
+    """Clip and pad text to a visible width, ignoring ANSI color sequences."""
+    parts = ANSI_TOKENS.split(str(text))
+    output = []
+    visible = 0
+    clipped = False
+
+    for part in parts:
+        if not part:
+            continue
+        if ANSI_ESCAPE.fullmatch(part):
+            output.append(part)
+            continue
+
+        remaining = width - visible
+        if remaining <= 0:
+            clipped = True
+            break
+        if len(part) > remaining:
+            output.append(part[:remaining])
+            visible += remaining
+            clipped = True
+            break
+        output.append(part)
+        visible += len(part)
+
+    if clipped:
+        output.append(RESET)
+    output.append(" " * max(0, width - visible))
+    return "".join(output)
+
+
+def print_ascii_table(headers, rows, widths):
+    """Print a fixed-width table whose columns stay aligned with ANSI colors."""
+    border = "  +" + "+".join("-" * (width + 2) for width in widths) + "+"
+
+    def render_row(cells):
+        padded = [fit_ansi(cell, width) for cell, width in zip(cells, widths)]
+        return "  | " + " | ".join(padded) + " |"
+
+    print(f"{BOLD}{border}{RESET}")
+    print(render_row(headers))
+    print(border)
+    for row in rows:
+        print(render_row(row))
+    print(f"{BOLD}{border}{RESET}")
+
+
+def render_progress(percent: int, label: str):
+    """Render one stable-width progress line for Windows terminals."""
     steps = 25
-    sleep_interval = total_seconds / steps
+    percent = max(0, min(100, percent))
+    filled = round(steps * percent / 100)
+    bar = "=" * filled + "-" * (steps - filled)
+    label = label[:40]
+    print(f"\r  {CYAN}[{bar}] {percent:3d}% | {label:<40}{RESET}", end="", flush=True)
+
+
+def progress_bar(total_seconds: float, label: str):
+    """Show a timed ASCII progress bar."""
+    steps = 25
+    sleep_interval = max(0.0, total_seconds / steps)
     for i in range(steps + 1):
-        percent = int((i / steps) * 100)
-        bar = "=" * i + "-" * (steps - i)
-        print(f"\r  {CYAN}[{bar}] {percent:3d}% | {label}{RESET}", end="", flush=True)
-        time.sleep(sleep_interval)
+        render_progress(int((i / steps) * 100), label)
+        if i < steps and sleep_interval:
+            time.sleep(sleep_interval)
     print()
 
 
@@ -203,18 +283,18 @@ def print_dashboard_table(p: dict, phase_notes: dict):
     health_str = "NORMAL" if p["is_anomaly"] == 0 else "ANOMALY"
     rca_main = f"Lat:{p['attr']['latency']:.0f}%"
 
-    print(f"""
-  {BOLD}+----+-----------------------+-----------+--------+---------------------------------------+{RESET}
-  | ID | PANEL                 | VALUE     | UNIT   | STATUS & OBSERVATION                  |
-  +----+-----------------------+-----------+--------+---------------------------------------+
-  | P1 | CPU Utilization       | {c_p1}{p['cpu']:<9.1f}{RESET} | %      | {phase_notes.get('p1', ''):<37} |
-  | P2 | Request Latency       | {c_p2}{p['latency']:<9.2f}{RESET} | s      | {phase_notes.get('p2', ''):<37} |
-  | P3 | Anomaly Score         | {c_p3}{p['score']:<9.2f}{RESET} | [0-1]  | {phase_notes.get('p3', ''):<37} |
-  | P4 | System Health         | {c_p4}{health_str:<9}{RESET} | -      | {phase_notes.get('p4', ''):<37} |
-  | P5 | Root Cause            | {rca_main:<9} | %      | {phase_notes.get('p5', ''):<37} |
-  | P6 | Self-Healing Events   | {c_p6}{p['heal_count']:<9}{RESET} | count  | {phase_notes.get('p6', ''):<37} |
-  {BOLD}+----+-----------------------+-----------+--------+---------------------------------------+{RESET}
-""")
+    print_ascii_table(
+        ["ID", "PANEL", "VALUE", "UNIT", "STATUS & OBSERVATION"],
+        [
+            ["P1", "CPU Utilization", f"{c_p1}{p['cpu']:.1f}{RESET}", "%", phase_notes.get("p1", "")],
+            ["P2", "Request Latency", f"{c_p2}{p['latency']:.2f}{RESET}", "s", phase_notes.get("p2", "")],
+            ["P3", "Anomaly Score", f"{c_p3}{p['score']:.2f}{RESET}", "[0-1]", phase_notes.get("p3", "")],
+            ["P4", "System Health", f"{c_p4}{health_str}{RESET}", "-", phase_notes.get("p4", "")],
+            ["P5", "Root Cause", rca_main, "%", phase_notes.get("p5", "")],
+            ["P6", "Self-Healing Events", f"{c_p6}{p['heal_count']}{RESET}", "count", phase_notes.get("p6", "")],
+        ],
+        [2, 21, 9, 6, 37],
+    )
 
 
 def run_phase_1(speed: float):
@@ -259,18 +339,27 @@ def run_phase_2(speed: float):
     print_dashboard_table(p, notes)
 
 
-def run_phase_3():
+def run_phase_3(speed: float):
     print(f"{BOLD}{MAGENTA}========================================================================{RESET}")
     print(f"{BOLD}{MAGENTA}[PHASE 3] AI DETECTION & ROOT CAUSE{RESET}")
     print(f"{BOLD}{MAGENTA}========================================================================{RESET}")
     print("  Action: Gray Failure confirmed | Isolation Forest multivariate trigger")
 
     p = None
-    for _ in range(6):
+    max_checks = 6
+    detected = False
+    for attempt in range(max_checks):
         p = fetch_live_panels(fallback_latency=2.35)
-        if p["score"] >= 0.70 or p["is_anomaly"] == 1:
+        detected = p["score"] >= 0.70 or p["is_anomaly"] == 1
+        if detected:
+            render_progress(100, "AI anomaly detected")
             break
-        time.sleep(2.0)
+        percent = int(((attempt + 1) / max_checks) * 100)
+        label = "Evaluation complete; below threshold" if attempt == max_checks - 1 else "Evaluating AI score..."
+        render_progress(percent, label)
+        if attempt < max_checks - 1:
+            time.sleep(2.0 / max(speed, 0.01))
+    print()
 
     if p is None:
         p = fetch_live_panels(fallback_latency=2.35)
@@ -279,7 +368,7 @@ def run_phase_3():
     p4_note = f"{RED}[ALERT] Critical anomaly confirmed{RESET}" if p["is_anomaly"] == 1 else f"{YELLOW}[WARNING] Investigating{RESET}"
 
     notes = {
-        "p1": f"{YELLOW}[BLIND SPOT] Static rule missed!{RESET}",
+        "p1": f"{YELLOW}[CPU] <80%; latency alert separate{RESET}",
         "p2": f"{RED}[BREACH] Latency severely degraded{RESET}",
         "p3": p3_note,
         "p4": p4_note,
@@ -321,18 +410,17 @@ def run_phase_5_summary():
     print("[PHASE 5] SRE EVALUATION SUMMARY")
     print(f"========================================================================{RESET}")
 
-    summary_table = f"""
-+------------------------------+------------------------+------------------------+
-| {BOLD}SRE Evaluation Criterion{RESET}     | {BOLD}Static Threshold (Legacy){RESET}| {BOLD}AIOps Dynamic (Proposed){RESET} |
-+------------------------------+------------------------+------------------------+
-| Gray Failure Detection       | {RED}[MISSED] 0% detected{RESET}    | {GREEN}[DETECTED] Score > 0.70{RESET}  |
-| CPU During Degradation       | 42% (Under 80% limit)  | 42% (Multivariate AI)  |
-| Mean Time to Detect (MTTD)   | Infinite (No alert)    | {GREEN}~15 seconds{RESET}            |
-| Root Cause Analysis          | None (Manual logs)     | {CYAN}Latency ~78% (Panel 5){RESET}   |
-| Remediation Time (MTTR)      | Manual (15-30 minutes) | {GREEN}Automated 1s (Panel 6){RESET}   |
-+------------------------------+------------------------+------------------------+
-"""
-    print(summary_table)
+    print_ascii_table(
+        ["SRE Evaluation Criterion", "CPU-only threshold", "AIOps demo"],
+        [
+            ["Gray Failure Detection", f"{RED}[MISSED] CPU < 80%{RESET}", f"{GREEN}[DETECTED] Score > 0.70{RESET}"],
+            ["CPU During Degradation", "~42% simulated", "~42% simulated"],
+            ["Detection Time", "Not benchmarked", "~15s illustrative"],
+            ["Root Cause Analysis", "Manual investigation", f"{CYAN}Latency attribution{RESET}"],
+            ["Remediation", "Manual action", f"{GREEN}Simulated reset{RESET}"],
+        ],
+        [28, 22, 22],
+    )
 
 
 def main():
@@ -349,7 +437,7 @@ def main():
     phases = [
         ("Phase 1: Baseline Establishment", lambda: run_phase_1(args.speed)),
         ("Phase 2: Gray Failure Injection", lambda: run_phase_2(args.speed)),
-        ("Phase 3: AI Detection & Root Cause", run_phase_3),
+        ("Phase 3: AI Detection & Root Cause", lambda: run_phase_3(args.speed)),
         ("Phase 4: Closed-Loop Remediation", run_phase_4),
         ("Phase 5: SRE Evaluation Summary", run_phase_5_summary)
     ]

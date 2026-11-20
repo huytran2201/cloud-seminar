@@ -1,6 +1,6 @@
 # ========================================================================
 # start_demo.ps1 - 1-Click Master Runner for AIOps Cloud Demo
-# Workflow: Verify Docker -> Start Containers -> Wait Healthy -> Open Grafana -> Run Demo
+# Workflow: Verify Docker -> Start Containers -> Wait Healthy -> Open Monitoring Pages -> Run Demo
 # ========================================================================
 $OutputEncoding = [System.Text.Encoding]::UTF8
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
@@ -8,7 +8,7 @@ try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 Write-Host ""
 Write-Host "========================================================================" -ForegroundColor Cyan
 Write-Host "AIOps & Cloud Monitoring Demo - 1-Click Master Runner" -ForegroundColor Cyan
-Write-Host "Workflow: Docker Services -> Open Grafana Browser -> Interactive Demo" -ForegroundColor Cyan
+Write-Host "Workflow: Docker Services -> Monitoring Pages -> Interactive Demo" -ForegroundColor Cyan
 Write-Host "========================================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -22,6 +22,7 @@ if ($LASTEXITCODE -ne 0) {
     Read-Host "Press [Enter] to exit"
     exit 1
 }
+
 Write-Host "  [OK] Docker engine is running." -ForegroundColor Green
 
 # 2. Launch 4 Microservices via Docker Compose
@@ -34,47 +35,129 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+$receiverBinding = docker-compose port alert-receiver 8081
+if ($LASTEXITCODE -ne 0 -or -not $receiverBinding) {
+    Write-Host "[ERROR] Could not determine the Alert Receiver host port." -ForegroundColor Red
+    Read-Host "Press [Enter] to exit"
+    exit 1
+}
+$receiverPort = ($receiverBinding.Trim() -split ":")[-1]
+$receiverUrl = "http://localhost:$receiverPort"
+Write-Host "  [INFO] Alert Receiver is available at $receiverUrl" -ForegroundColor Cyan
+
 # 3. Wait for services healthy
 Write-Host ""
 Write-Host "[3/4] Waiting for services to become healthy..." -ForegroundColor Yellow
-$maxRetries = 25
-$ready = $false
-
-for ($i = 1; $i -le $maxRetries; $i++) {
-    try {
-        $appResp = Invoke-WebRequest -Uri "http://localhost:8000/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
-        $promResp = Invoke-WebRequest -Uri "http://localhost:9090/-/healthy" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
-        $aiResp = Invoke-WebRequest -Uri "http://localhost:8001/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
-        $alertmanagerResp = Invoke-WebRequest -Uri "http://localhost:9093/-/healthy" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
-        $receiverResp = Invoke-WebRequest -Uri "http://localhost:8081/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
-        
-        if ($appResp.StatusCode -eq 200 -and $promResp.StatusCode -eq 200 -and $aiResp.StatusCode -eq 200 -and $alertmanagerResp.StatusCode -eq 200 -and $receiverResp.StatusCode -eq 200) {
-            $ready = $true
-            break
-        }
-    } catch {}
-    Write-Host -NoNewline "." -ForegroundColor DarkGray
-    Start-Sleep -Seconds 2
+$healthChecks = @(
+    @{ Name = "Application"; Url = "http://localhost:8000/health" },
+    @{ Name = "Prometheus"; Url = "http://localhost:9090/-/healthy" },
+    @{ Name = "AI Detector"; Url = "http://localhost:8001/health" },
+    @{ Name = "Alertmanager"; Url = "http://localhost:9093/-/healthy" },
+    @{ Name = "Alert Receiver"; Url = "$receiverUrl/health" },
+    @{ Name = "Grafana"; Url = "http://localhost:3000/api/health" }
+)
+$healthDeadline = [DateTime]::UtcNow.AddSeconds(45)
+try {
+    Add-Type -AssemblyName System.Net.Http -ErrorAction Stop
+    $httpClient = [System.Net.Http.HttpClient]::new()
+    $httpClient.Timeout = [TimeSpan]::FromSeconds(3)
+} catch {
+    Write-Host "[ERROR] Could not initialize the HTTP health checker: $($_.Exception.Message)" -ForegroundColor Red
+    Read-Host "Press [Enter] to exit"
+    exit 1
 }
+$ready = $false
+$unhealthyServices = @()
+
+$retryDelayMs = 1000
+while ([DateTime]::UtcNow -lt $healthDeadline) {
+    $roundTasks = @(
+        foreach ($check in $healthChecks) {
+            $httpClient.GetAsync($check.Url)
+        }
+    )
+
+    try { [void][System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]$roundTasks, 3000) } catch {}
+
+    $unhealthyServices = @()
+    for ($i = 0; $i -lt $healthChecks.Count; $i++) {
+        $task = $roundTasks[$i]
+        if ($task.Status -eq [System.Threading.Tasks.TaskStatus]::RanToCompletion) {
+            $response = $task.Result
+            if (-not $response.IsSuccessStatusCode) {
+                $unhealthyServices += "$($healthChecks[$i].Name) (HTTP $([int]$response.StatusCode))"
+            }
+            $response.Dispose()
+        } else {
+            $unhealthyServices += $healthChecks[$i].Name
+        }
+    }
+
+    if ($unhealthyServices.Count -eq 0) {
+        $ready = $true
+        break
+    }
+
+    Write-Host -NoNewline "." -ForegroundColor DarkGray
+    Start-Sleep -Milliseconds $retryDelayMs
+}
+$httpClient.Dispose()
 Write-Host ""
 
 if ($ready) {
     Write-Host "  [OK] Application, monitoring and alerting services are healthy." -ForegroundColor Green
 } else {
-    Write-Host "  [WARN] Proceeding with connection..." -ForegroundColor Yellow
+    Write-Host "  [WARN] Still waiting on: $($unhealthyServices -join ', '). Proceeding anyway..." -ForegroundColor Yellow
 }
 
-# 4. Open Grafana Dashboard
+# 4. Open monitoring pages
 Write-Host ""
-Write-Host "[4/4] Opening Grafana Dashboard in browser (http://localhost:3000)..." -ForegroundColor Green
+Write-Host "[4/4] Opening monitoring pages in your default browser..." -ForegroundColor Green
+Write-Host "  Grafana:        http://localhost:3000"
+Write-Host "  Prometheus:     http://localhost:9090/alerts"
+Write-Host "  Alertmanager:   http://localhost:9093/#/alerts"
+Write-Host "  Alert Receiver: $receiverUrl"
 Start-Process "http://localhost:3000"
-Start-Process "http://localhost:8081"
+Start-Process "http://localhost:9090/alerts"
+Start-Process "http://localhost:9093/#/alerts"
+Start-Process $receiverUrl
 Start-Sleep -Seconds 2
 
 # 5. Launch interactive demo
 Write-Host ""
 Write-Host "STARTING SRE DEMONSTRATION WORKFLOW:" -ForegroundColor Cyan
-python run_demo.py --interactive
+$pythonCommand = $null
+$pythonArguments = @()
+$pythonCandidates = @(
+    @{ Command = (Join-Path $PSScriptRoot ".venv\Scripts\python.exe"); Arguments = @() },
+    @{ Command = "py"; Arguments = @("-3.13") },
+    @{ Command = "py"; Arguments = @() },
+    @{ Command = "python"; Arguments = @() }
+)
+
+foreach ($candidate in $pythonCandidates) {
+    if (-not (Get-Command $candidate.Command -ErrorAction SilentlyContinue)) {
+        continue
+    }
+    $checkArguments = @($candidate.Arguments) + @("-c", "import requests")
+    $null = & $candidate.Command @checkArguments 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $pythonCommand = $candidate.Command
+        $pythonArguments = @($candidate.Arguments)
+        break
+    }
+}
+
+if (-not $pythonCommand) {
+    Write-Host "[ERROR] No Python interpreter with the 'requests' package was found." -ForegroundColor Red
+    Write-Host "Install requests in your Python 3.10+ environment, then run this script again." -ForegroundColor Yellow
+    Write-Host "Example: py -m pip install requests" -ForegroundColor Yellow
+    Read-Host "Press [Enter] to exit"
+    exit 1
+}
+
+Write-Host "  [INFO] Running demo with $pythonCommand $($pythonArguments -join ' ')" -ForegroundColor Cyan
+& $pythonCommand @pythonArguments run_demo.py --interactive
 
 # 6. Cleanup prompt
 Write-Host ""

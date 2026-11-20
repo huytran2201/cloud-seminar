@@ -52,6 +52,24 @@ Workflow: Docker Services -> Open Grafana Browser -> Interactive Demo
         input("Press [Enter] to exit...")
         sys.exit(1)
 
+    try:
+        port_res = subprocess.run(
+            ["docker-compose", "port", "alert-receiver", "8081"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        port_binding = next(line.strip() for line in port_res.stdout.splitlines() if line.strip())
+        receiver_port = port_binding.rsplit(":", 1)[-1]
+        if not receiver_port.isdigit():
+            raise ValueError(f"Unexpected docker-compose port output: {port_binding}")
+        receiver_url = f"http://127.0.0.1:{receiver_port}"
+        print(f"  {CYAN}[INFO] Alert Receiver: {receiver_url}{RESET}")
+    except Exception as e:
+        print(f"  {RED}[ERROR] Cannot determine Alert Receiver port: {e}{RESET}")
+        sys.exit(1)
+
     # 3. Wait for services healthy
     print(f"\n{YELLOW}[3/4] Waiting for all services to become healthy...{RESET}")
     ready = False
@@ -61,7 +79,7 @@ Workflow: Docker Services -> Open Grafana Browser -> Interactive Demo
             r2 = requests.get("http://localhost:9090/-/healthy", timeout=2)
             r3 = requests.get("http://localhost:8001/health", timeout=2)
             r4 = requests.get("http://localhost:9093/-/healthy", timeout=2)
-            r5 = requests.get("http://localhost:8081/health", timeout=2)
+            r5 = requests.get(f"{receiver_url}/health", timeout=2)
             if all(r.status_code == 200 for r in (r1, r2, r3, r4, r5)):
                 ready = True
                 break
@@ -79,7 +97,7 @@ Workflow: Docker Services -> Open Grafana Browser -> Interactive Demo
     # 4. Open Grafana
     print(f"{GREEN}[4/4] Opening Grafana Dashboard in default browser (http://localhost:3000)...{RESET}\n")
     webbrowser.open("http://localhost:3000")
-    webbrowser.open("http://localhost:8081")
+    webbrowser.open(receiver_url)
     time.sleep(2)
 
     # 5. Execute interactive demo
