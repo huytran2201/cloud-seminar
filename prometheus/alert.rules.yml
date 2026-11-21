@@ -4,9 +4,15 @@ groups:
       - record: windows_host_cpu_percent
         expr: 100 * (1 - avg by (instance) (rate(windows_cpu_time_seconds_total{job="windows-host", mode="idle"}[1m])))
 
+      - record: windows_client_cpu_percent
+        expr: 100 * (1 - avg by (instance) (rate(windows_cpu_time_seconds_total{job="windows-client", mode="idle"}[1m])))
+
       # 0 means close to the rolling 5-minute mean; 1 means at least 3 standard deviations away.
       - record: windows_host_cpu_anomaly_score
         expr: clamp_max(abs(windows_host_cpu_percent - avg_over_time(windows_host_cpu_percent[5m])) / (3 * clamp_min(stddev_over_time(windows_host_cpu_percent[5m]), 2)), 1)
+
+      - record: windows_client_cpu_anomaly_score
+        expr: clamp_max(abs(windows_client_cpu_percent - avg_over_time(windows_client_cpu_percent[5m])) / (3 * clamp_min(stddev_over_time(windows_client_cpu_percent[5m]), 2)), 1)
 
   - name: service-health
     rules:
@@ -39,6 +45,16 @@ groups:
         annotations:
           summary: "Windows host exporter is unreachable"
           description: "Prometheus has failed to scrape {{ $labels.instance }} for at least 10 seconds. No automatic recovery action is configured."
+
+      - alert: WindowsClientExporterDown
+        expr: up{job="windows-client"} == 0
+        for: 10s
+        labels:
+          severity: critical
+          service: windows-client
+        annotations:
+          summary: "Windows client exporter is unreachable"
+          description: "Prometheus has failed to scrape {{ $labels.instance }} for at least 10 seconds. Check VPN reachability and windows_exporter."
 
       - alert: HighRequestLatency
         expr: |
@@ -74,14 +90,14 @@ groups:
           description: "The current anomaly score is {{ $value | humanize }}."
 
       - alert: WindowsHostCPUAnomalyDetected
-        expr: windows_host_cpu_anomaly_score > 0.7
+        expr: windows_ai_anomaly_score{machine="host"} >= 0.7
         for: 10s
         labels:
           severity: warning
           service: windows-host
         annotations:
           summary: "Windows host CPU anomaly score crossed 0.70"
-          description: "CPU anomaly score for {{ $labels.instance }} is {{ $value | humanize }}."
+          description: "Combined real CPU and exporter scrape-latency anomaly score is {{ $value | humanize }}."
 
       - alert: WindowsHostCPUUsageHigh
         expr: windows_host_cpu_percent > 80
@@ -91,4 +107,24 @@ groups:
           service: windows-host
         annotations:
           summary: "Windows host CPU usage is above 80%"
+          description: "CPU usage for {{ $labels.instance }} is {{ $value | humanize }} percent."
+
+      - alert: WindowsClientCPUAnomalyDetected
+        expr: windows_ai_anomaly_score{machine="client"} >= 0.7
+        for: 10s
+        labels:
+          severity: warning
+          service: windows-client
+        annotations:
+          summary: "Windows client CPU anomaly score crossed 0.70"
+          description: "Combined real CPU and exporter scrape-latency anomaly score is {{ $value | humanize }}."
+
+      - alert: WindowsClientCPUUsageHigh
+        expr: windows_client_cpu_percent > 80
+        for: 5s
+        labels:
+          severity: warning
+          service: windows-client
+        annotations:
+          summary: "Windows client CPU usage is above 80%"
           description: "CPU usage for {{ $labels.instance }} is {{ $value | humanize }} percent."

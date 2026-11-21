@@ -21,6 +21,11 @@ scrape_configs:
       - targets: ["host.docker.internal:9182"]
     metrics_path: /metrics
 
+  - job_name: "windows-client"
+    static_configs:
+      - targets: ["26.46.160.244:9182"]
+    metrics_path: /metrics
+
   # --- Service 1: Target Microservice (FastAPI) ---
   - job_name: "app"
     static_configs:
@@ -32,3 +37,5 @@ scrape_configs:
     static_configs:
       - targets: ["ai-detector:8001"]
     metrics_path: /metrics
+
+

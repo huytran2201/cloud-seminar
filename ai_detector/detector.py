@@ -64,6 +64,31 @@ FEATURE_ATTRIBUTION = Gauge(
     "XAI Root Cause: Tỷ lệ phần trăm đóng góp của đặc trưng vào điểm bất thường (0.0 - 1.0)",
     ["feature"]
 )
+WINDOWS_AI_SCORE = Gauge(
+    "windows_ai_anomaly_score",
+    "Isolation Forest anomaly score from real CPU and Prometheus exporter scrape latency [0.0, 1.0]",
+    ["machine"]
+)
+WINDOWS_AI_IS_ANOMALY = Gauge(
+    "windows_ai_is_anomaly",
+    "1 when the real-machine Isolation Forest score is at least 0.70, otherwise 0",
+    ["machine"]
+)
+WINDOWS_AI_FEATURE_ATTRIBUTION = Gauge(
+    "windows_ai_feature_attribution",
+    "Relative standardized feature contribution for a real-machine anomaly score",
+    ["machine", "feature"]
+)
+
+
+def remove_metric_labels(metric: Gauge, *label_values: str) -> None:
+    """Remove a labeled sample if it exists; prometheus_client raises KeyError otherwise."""
+    try:
+        metric.remove(*label_values)
+    except KeyError:
+        pass
+
+
 REMEDIATION_TRIGGER_COUNTER = Counter(
     "ai_remediation_triggers_total",
     "Tổng số lần AIOps Detector tự động gửi lệnh Self-Healing đến microservice"
@@ -121,6 +146,77 @@ def query_prometheus_range(metric_expr: str, minutes: int = WINDOW_MINUTES) -> l
         return []
 
 
+def query_prometheus_samples(
+    metric_expr: str,
+    start: int,
+    end: int,
+) -> dict[int, float]:
+    """Return one range-query series keyed by its shared 5-second timestamp."""
+    try:
+        resp = requests.get(
+            f"{PROMETHEUS_URL}/api/v1/query_range",
+            params={"query": metric_expr, "start": start, "end": end, "step": "5s"},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        results = resp.json().get("data", {}).get("result", [])
+        if not results:
+            return {}
+        return {
+            int(float(timestamp)): float(value)
+            for timestamp, value in results[0].get("values", [])
+            if value not in ("NaN", "+Inf", "-Inf")
+        }
+    except Exception as e:
+        log.warning(f"Lỗi query Prometheus [{metric_expr}]: {e}")
+        return {}
+
+
+def score_windows_machine(
+    machine: str,
+    cpu_metric: str,
+    scrape_latency_samples: dict[int, float],
+    start: int,
+    end: int,
+) -> None:
+    """Score one Windows machine using real CPU and its exporter scrape duration."""
+    cpu_samples = query_prometheus_samples(cpu_metric, start, end)
+    timestamps = sorted(set(cpu_samples) & set(scrape_latency_samples))
+    if len(timestamps) < MIN_POINTS:
+        remove_metric_labels(WINDOWS_AI_SCORE, machine)
+        remove_metric_labels(WINDOWS_AI_IS_ANOMALY, machine)
+        for feature in ("scrape_latency", "cpu"):
+            remove_metric_labels(WINDOWS_AI_FEATURE_ATTRIBUTION, machine, feature)
+        log.info(
+            f"Chưa đủ dữ liệu AI cho {machine}: {len(timestamps)}/{MIN_POINTS} điểm "
+            "đồng bộ CPU real + exporter scrape latency."
+        )
+        return
+
+    X = np.asarray([
+        [scrape_latency_samples[t], cpu_samples[t]]
+        for t in timestamps
+    ], dtype=float)
+    X = X[np.isfinite(X).all(axis=1)]
+    if len(X) < MIN_POINTS:
+        remove_metric_labels(WINDOWS_AI_SCORE, machine)
+        remove_metric_labels(WINDOWS_AI_IS_ANOMALY, machine)
+        for feature in ("scrape_latency", "cpu"):
+            remove_metric_labels(WINDOWS_AI_FEATURE_ATTRIBUTION, machine, feature)
+        return
+
+    score, attribution = train_and_score(X, feature_names=("scrape_latency", "cpu"))
+    WINDOWS_AI_SCORE.labels(machine=machine).set(score)
+    WINDOWS_AI_IS_ANOMALY.labels(machine=machine).set(int(score >= ANOMALY_THRESHOLD))
+    for feature, value in attribution.items():
+        WINDOWS_AI_FEATURE_ATTRIBUTION.labels(machine=machine, feature=feature).set(value)
+    log.info(
+        f"Windows {machine} AI Score: {score:.3f} "
+        f"Scrape latency {attribution['scrape_latency']*100:.1f}%, "
+        f"Real CPU {attribution['cpu']*100:.1f}%)"
+    )
+
+
 def generate_baseline_data(n: int = MIN_POINTS) -> np.ndarray:
     """
     Sinh dữ liệu nền (baseline) khi Prometheus chưa đủ dữ liệu.
@@ -158,7 +254,10 @@ def build_feature_matrix(
     return X if len(X) >= 2 else None
 
 
-def train_and_score(X: np.ndarray) -> tuple[float, dict[str, float]]:
+def train_and_score(
+    X: np.ndarray,
+    feature_names: tuple[str, ...] = ("request_rate", "latency", "cpu"),
+) -> tuple[float, dict[str, float]]:
     """
     Huấn luyện Isolation Forest và tính toán XAI Feature Attribution.
     """
@@ -186,12 +285,11 @@ def train_and_score(X: np.ndarray) -> tuple[float, dict[str, float]]:
     if total_dev > 1e-6:
         attr_weights = abs_deviations / total_dev
     else:
-        attr_weights = np.array([0.333, 0.333, 0.334])
-        
+        attr_weights = np.full(len(feature_names), 1.0 / len(feature_names))
+
     attribution = {
-        "request_rate": float(attr_weights[0]),
-        "latency": float(attr_weights[1]),
-        "cpu": float(attr_weights[2])
+        feature: float(weight)
+        for feature, weight in zip(feature_names, attr_weights)
     }
     
     return score, attribution
@@ -216,11 +314,33 @@ def detection_loop():
     
     while True:
         try:
+            # Build aligned real-machine feature windows from shared Prometheus timestamps.
+            score_end = int(time.time() // 5 * 5)
+            score_start = score_end - WINDOW_MINUTES * 60
+            host_scrape_latency_samples = query_prometheus_samples(
+                'scrape_duration_seconds{job="windows-host"}',
+                score_start,
+                score_end,
+            )
+            client_scrape_latency_samples = query_prometheus_samples(
+                'scrape_duration_seconds{job="windows-client"}',
+                score_start,
+                score_end,
+            )
+            score_windows_machine(
+                "host", "windows_host_cpu_percent", host_scrape_latency_samples,
+                score_start, score_end,
+            )
+            score_windows_machine(
+                "client", "windows_client_cpu_percent", client_scrape_latency_samples,
+                score_start, score_end,
+            )
+
             request_rates = query_prometheus_range(
-                'rate(app_requests_total[30s])'
+                'sum(rate(app_requests_total[30s]))'
             )
             latencies = query_prometheus_range(
-                'rate(app_request_latency_seconds_sum[30s]) / rate(app_request_latency_seconds_count[30s])'
+                'sum(rate(app_request_latency_seconds_sum[30s])) / sum(rate(app_request_latency_seconds_count[30s]))'
             )
             cpu_percents = query_prometheus_range(
                 'app_simulated_cpu_percent'

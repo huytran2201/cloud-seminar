@@ -82,7 +82,7 @@ Grafana nạp dashboard tự động. Prometheus và Alertmanager xem các alert
 
 ### 4. Bật đo CPU thật của máy Windows
 
-Dashboard có các panel riêng cho Windows host: **Windows Host CPU (Real)**, **Windows Host CPU Anomaly Score**, **Windows Exporter Scrape Latency** và **Windows Host System Health**. Đường đỏ `80%` trên CPU thật kích hoạt `WindowsHostCPUUsageHigh` khi vượt ngưỡng 5 giây; đường đỏ `0.7` trên anomaly score kích hoạt `WindowsHostCPUAnomalyDetected` khi vượt ngưỡng 10 giây. Nếu exporter mất kết nối 10 giây, Prometheus firing `WindowsHostExporterDown`. Alertmanager gửi các alert này tới Alert Receiver cục bộ; cấu hình hiện không gửi thông báo desktop/email. Scrape latency đo thời gian Prometheus lấy metrics từ exporter, không phải độ trễ thực thi CPU hay request ứng dụng. System Health biểu thị target exporter UP/DOWN. Score thống kê mức lệch CPU so với trung bình trượt 5 phút (0 = bình thường theo cửa sổ gần đây; 1 = lệch ít nhất 3 độ lệch chuẩn); nó khác với Isolation Forest score của app. Không có hành động tự phục hồi cho Windows host; panel **Self-Healing Events** hiện có vẫn đếm remediation của app demo. Panel **CPU Utilization** hiện có vẫn là CPU giả lập của app.
+Dashboard tách CPU thành ba nguồn: **CPU Demo (Simulated)** lấy từ app, **Windows Host CPU (Real)** lấy từ máy Windows chạy Docker, và **Windows Client CPU (Real)** lấy từ máy bạn bè qua VPN. Host vẫn có thêm anomaly score, scrape latency và trạng thái exporter. Panel CPU client sử dụng recording rule `windows_client_cpu_percent`.
 
 1. Tải và cài MSI `windows_exporter` phù hợp với máy từ [GitHub Releases](https://github.com/prometheus-community/windows_exporter/releases). Cài với thiết lập mặc định; exporter chạy như Windows service và mặc định xuất metrics ở cổng `9182`, đường dẫn `/metrics`.
 2. Trên máy Windows, mở `http://localhost:9182/metrics` để xác nhận endpoint trả về metrics.
@@ -102,6 +102,8 @@ Dashboard có các panel riêng cho Windows host: **Windows Host CPU (Real)**, *
 
 Prometheus truy cập exporter qua `host.docker.internal`, tên host Docker Desktop dùng để container kết nối về máy Windows. Scrape target và PromQL của panel đã được khai báo trong repo.
 
+Để bật CPU máy khách, cài `windows_exporter` trên máy bạn bè, đảm bảo máy Prometheus truy cập được IP VPN của họ ở TCP `9182`, rồi thay `YOUR_FRIEND_VPN_IP` trong `prometheus/prometheus.yml` bằng IP VPN thật. Kiểm tra `http://<IP-VPN>:9182/metrics` từ máy chạy stack, sau đó áp dụng cấu hình bằng `docker-compose restart prometheus`. Khi target `windows-client` hiện **UP** tại `http://localhost:9090/targets`, panel **Windows Client CPU (Real)** sẽ có dữ liệu. Windows Firewall trên máy khách cần cho phép kết nối tới cổng `9182` từ máy chạy Prometheus.
+
 ### Dừng hoặc làm sạch dữ liệu
 
 ```powershell
@@ -118,7 +120,7 @@ Lưu ý: receiver giữ lịch sử trong bộ nhớ; nếu container receiver b
 
 ### Giới hạn mô phỏng cần biết
 
-- CPU/RAM của app vẫn là **metric giả lập**; panel **Windows Host CPU (Real)** dùng `windows_exporter` để đo CPU thật của máy Windows chạy Docker Desktop. Latency được tạo từ thời gian xử lý mô phỏng.
+- CPU/RAM của app vẫn là **metric giả lập**; panel CPU host và CPU client dùng `windows_exporter` để đo CPU thật từ từng máy Windows. Latency được tạo từ thời gian xử lý mô phỏng.
 - Docker DNS phân giải tên service như `app` và `ai-detector`, nhưng Prometheus vẫn có `static_configs`; thêm target mới vẫn cần sửa cấu hình scrape.
 - `/api/remediate` đặt lại các metric/trạng thái mô phỏng của app. Đây chưa phải thao tác khởi động lại container, sửa máy thật hay chạy remediation trên hạ tầng production.
 - Alertmanager hiện gửi webhook tới receiver cục bộ; chưa gửi Telegram, Slack hay email.
